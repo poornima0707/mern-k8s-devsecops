@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# OS files
+.DS_Store
+
+# Logs
+*.log
+
+# Kubernetes junk
+*.tar
+*.zip
+
+# Chrome installer
+*.deb
+
+# Minikube binary
+minikube-linux-amd64
+
+# Build folders
+dist/
+build/
