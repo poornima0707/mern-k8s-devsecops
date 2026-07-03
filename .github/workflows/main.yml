@@ -10,9 +10,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+          --region ${{ secrets.AWS_REGION }} \
+          --name ${{ secrets.EKS_CLUSTER_NAME }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -31,6 +43,7 @@ jobs:
         working-directory: Application-Code/frontend
         env:
           NODE_OPTIONS: --openssl-legacy-provider
+          REACT_APP_BACKEND_URL: http://backend-service:3500/api/tasks
         run: npm run build
 
       - name: Login to DockerHub
@@ -41,11 +54,14 @@ jobs:
 
       - name: Build Backend Image
         run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/mern-backend:v1 ./Application-Code/backend
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/mern-backend:v3 ./Application-Code/backend
 
       - name: Build Frontend Image
         run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/mern-frontend:v1 ./Application-Code/frontend
+          docker build \
+          --build-arg REACT_APP_BACKEND_URL=http://backend-service:3500/api/tasks \
+          -t ${{ secrets.DOCKER_USERNAME }}/mern-frontend:v3 \
+          ./Application-Code/frontend
 
       - name: Install Trivy
         run: |
@@ -57,38 +73,23 @@ jobs:
           sudo apt-get install -y trivy
 
       - name: Scan Backend Image
-        run: trivy image ${{ secrets.DOCKER_USERNAME }}/mern-backend:v1
+        run: trivy image ${{ secrets.DOCKER_USERNAME }}/mern-backend:v3
 
       - name: Scan Frontend Image
-        run: trivy image ${{ secrets.DOCKER_USERNAME }}/mern-frontend:v1
+        run: trivy image ${{ secrets.DOCKER_USERNAME }}/mern-frontend:v3
 
       - name: Push Backend Image
-        run: docker push ${{ secrets.DOCKER_USERNAME }}/mern-backend:v1
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/mern-backend:v3
 
       - name: Push Frontend Image
-        run: docker push ${{ secrets.DOCKER_USERNAME }}/mern-frontend:v1
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/mern-frontend:v3
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Update kubeconfig
+      - name: Update Kubernetes Images
         run: |
-          aws eks update-kubeconfig \
-            --region ap-south-1 \
-            --name mern-eks-cluster
+          kubectl set image deployment/backend backend=${{ secrets.DOCKER_USERNAME }}/mern-backend:v3 -n mern
+          kubectl set image deployment/frontend frontend=${{ secrets.DOCKER_USERNAME }}/mern-frontend:v3 -n mern
 
-      - name: Deploy to Kubernetes
+      - name: Verify Rollout
         run: |
-          kubectl apply -f Application-Code/k8s/
-
-      - name: Verify Deployment
-        run: |
-          kubectl get pods -n mern
-          kubectl get svc -n mern
+          kubectl rollout status deployment/backend -n mern
+          kubectl rollout status deployment/frontend -n mern
